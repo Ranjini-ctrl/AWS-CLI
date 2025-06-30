@@ -1,0 +1,522 @@
+import pygame
+import random
+import math
+import sys
+
+# Initialize Pygame
+pygame.init()
+
+# Constants
+SCREEN_WIDTH = 1200
+SCREEN_HEIGHT = 800
+FPS = 60
+GRAVITY = 0.5
+
+# Colors
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+BLUE = (0, 0, 255)
+YELLOW = (255, 255, 0)
+ORANGE = (255, 165, 0)
+PURPLE = (128, 0, 128)
+PINK = (255, 192, 203)
+BROWN = (139, 69, 19)
+GRAY = (128, 128, 128)
+DARK_RED = (139, 0, 0)
+
+# Fruit colors and properties
+FRUITS = {
+    'apple': {'color': RED, 'points': 10, 'size': 40},
+    'orange': {'color': ORANGE, 'points': 15, 'size': 35},
+    'banana': {'color': YELLOW, 'points': 20, 'size': 45},
+    'grape': {'color': PURPLE, 'points': 25, 'size': 30},
+    'watermelon': {'color': GREEN, 'points': 30, 'size': 60},
+    'strawberry': {'color': PINK, 'points': 35, 'size': 25}
+}
+
+class Particle:
+    def __init__(self, x, y, color):
+        self.x = x
+        self.y = y
+        self.vx = random.uniform(-5, 5)
+        self.vy = random.uniform(-8, -2)
+        self.color = color
+        self.life = 30
+        self.size = random.randint(2, 6)
+
+    def update(self):
+        self.x += self.vx
+        self.y += self.vy
+        self.vy += 0.2  # gravity
+        self.life -= 1
+        self.size = max(1, self.size - 0.1)
+
+    def draw(self, screen):
+        if self.life > 0:
+            alpha = self.life / 30
+            color = tuple(int(c * alpha) for c in self.color)
+            pygame.draw.circle(screen, color, (int(self.x), int(self.y)), int(self.size))
+
+class Fruit:
+    def __init__(self, fruit_type):
+        self.type = fruit_type
+        self.color = FRUITS[fruit_type]['color']
+        self.points = FRUITS[fruit_type]['points']
+        self.size = FRUITS[fruit_type]['size']
+
+        # Start position (bottom of screen)
+        self.x = random.randint(self.size, SCREEN_WIDTH - self.size)
+        self.y = SCREEN_HEIGHT + self.size
+
+        # Velocity
+        self.vx = random.uniform(-3, 3)
+        self.vy = random.uniform(-15, -10)
+
+        # Rotation
+        self.angle = 0
+        self.rotation_speed = random.uniform(-5, 5)
+
+        # State
+        self.sliced = False
+        self.slice_particles = []
+
+    def update(self):
+        if not self.sliced:
+            self.x += self.vx
+            self.y += self.vy
+            self.vy += GRAVITY
+            self.angle += self.rotation_speed
+
+        # Update particles if sliced
+        for particle in self.slice_particles[:]:
+            particle.update()
+            if particle.life <= 0:
+                self.slice_particles.remove(particle)
+
+    def draw(self, screen):
+        if not self.sliced:
+            # Draw fruit as circle with some details
+            pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), self.size)
+            pygame.draw.circle(screen, BLACK, (int(self.x), int(self.y)), self.size, 2)
+
+            # Add some fruit-specific details
+            if self.type == 'apple':
+                # Apple stem
+                pygame.draw.line(screen, BROWN,
+                               (int(self.x), int(self.y - self.size)),
+                               (int(self.x), int(self.y - self.size - 10)), 3)
+            elif self.type == 'watermelon':
+                # Watermelon stripes
+                for i in range(3):
+                    stripe_y = self.y - self.size//2 + i * self.size//3
+                    pygame.draw.arc(screen, DARK_RED,
+                                  (self.x - self.size, stripe_y - 5, self.size*2, 10),
+                                  0, math.pi, 2)
+            elif self.type == 'orange':
+                # Orange segments
+                for i in range(6):
+                    angle = i * math.pi / 3
+                    end_x = self.x + math.cos(angle) * self.size * 0.7
+                    end_y = self.y + math.sin(angle) * self.size * 0.7
+                    pygame.draw.line(screen, DARK_RED, (self.x, self.y), (end_x, end_y), 1)
+
+        # Draw particles
+        for particle in self.slice_particles:
+            particle.draw(screen)
+
+    def slice(self):
+        if not self.sliced:
+            self.sliced = True
+            # Create slice particles
+            for _ in range(15):
+                particle = Particle(self.x, self.y, self.color)
+                self.slice_particles.append(particle)
+            return self.points
+        return 0
+
+    def is_off_screen(self):
+        return self.y > SCREEN_HEIGHT + 100 or self.x < -100 or self.x > SCREEN_WIDTH + 100
+
+    def get_rect(self):
+        return pygame.Rect(self.x - self.size, self.y - self.size, self.size*2, self.size*2)
+
+class Bomb:
+    def __init__(self):
+        self.x = random.randint(50, SCREEN_WIDTH - 50)
+        self.y = SCREEN_HEIGHT + 50
+        self.vx = random.uniform(-2, 2)
+        self.vy = random.uniform(-12, -8)
+        self.size = 35
+        self.angle = 0
+        self.rotation_speed = random.uniform(-8, 8)
+        self.exploded = False
+        self.explosion_particles = []
+
+    def update(self):
+        if not self.exploded:
+            self.x += self.vx
+            self.y += self.vy
+            self.vy += GRAVITY
+            self.angle += self.rotation_speed
+
+        # Update explosion particles
+        for particle in self.explosion_particles[:]:
+            particle.update()
+            if particle.life <= 0:
+                self.explosion_particles.remove(particle)
+
+    def draw(self, screen):
+        if not self.exploded:
+            # Draw bomb as black circle with fuse
+            pygame.draw.circle(screen, BLACK, (int(self.x), int(self.y)), self.size)
+            pygame.draw.circle(screen, GRAY, (int(self.x), int(self.y)), self.size, 3)
+
+            # Fuse
+            fuse_x = self.x + math.cos(math.radians(self.angle)) * self.size
+            fuse_y = self.y + math.sin(math.radians(self.angle)) * self.size
+            pygame.draw.line(screen, BROWN, (int(self.x), int(self.y)), (int(fuse_x), int(fuse_y)), 3)
+
+            # Spark at end of fuse
+            pygame.draw.circle(screen, YELLOW, (int(fuse_x), int(fuse_y)), 3)
+
+        # Draw explosion particles
+        for particle in self.explosion_particles:
+            particle.draw(screen)
+
+    def explode(self):
+        if not self.exploded:
+            self.exploded = True
+            # Create explosion particles
+            for _ in range(30):
+                particle = Particle(self.x, self.y, YELLOW)
+                particle.vx = random.uniform(-10, 10)
+                particle.vy = random.uniform(-10, 10)
+                particle.life = 60
+                self.explosion_particles.append(particle)
+            return True
+        return False
+
+    def is_off_screen(self):
+        return self.y > SCREEN_HEIGHT + 100 or self.x < -100 or self.x > SCREEN_WIDTH + 100
+
+    def get_rect(self):
+        return pygame.Rect(self.x - self.size, self.y - self.size, self.size*2, self.size*2)
+
+class SlashEffect:
+    def __init__(self, points):
+        self.points = points
+        self.life = 20
+        self.width = 5
+
+    def update(self):
+        self.life -= 1
+        self.width = max(1, self.width - 0.2)
+
+    def draw(self, screen):
+        if self.life > 0 and len(self.points) > 1:
+            alpha = self.life / 20
+            color = tuple(int(255 * alpha) for _ in range(3))
+            for i in range(1, len(self.points)):
+                pygame.draw.line(screen, color, self.points[i-1], self.points[i], int(self.width))
+
+class Game:
+    def __init__(self):
+        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        pygame.display.set_caption("Fruit Ninja Clone")
+        self.clock = pygame.time.Clock()
+        self.font = pygame.font.Font(None, 48)
+        self.small_font = pygame.font.Font(None, 36)
+
+        # Game state
+        self.state = 'menu'  # menu, playing, game_over
+        self.score = 0
+        self.lives = 3
+        self.combo = 0
+        self.max_combo = 0
+
+        # Game objects
+        self.fruits = []
+        self.bombs = []
+        self.slash_effects = []
+
+        # Mouse tracking for slashing
+        self.mouse_trail = []
+        self.slashing = False
+
+        # Spawn timers
+        self.fruit_spawn_timer = 0
+        self.bomb_spawn_timer = 0
+        self.fruit_spawn_delay = 60
+        self.bomb_spawn_delay = 300
+
+        # Background
+        self.bg_color = (135, 206, 235)  # Sky blue
+
+    def spawn_fruit(self):
+        fruit_type = random.choice(list(FRUITS.keys()))
+        fruit = Fruit(fruit_type)
+        self.fruits.append(fruit)
+
+    def spawn_bomb(self):
+        bomb = Bomb()
+        self.bombs.append(bomb)
+
+    def check_slash_collision(self, trail):
+        points_earned = 0
+        sliced_fruits = 0
+
+        # Check fruit collisions
+        for fruit in self.fruits[:]:
+            if not fruit.sliced:
+                fruit_rect = fruit.get_rect()
+                for point in trail:
+                    if fruit_rect.collidepoint(point):
+                        points = fruit.slice()
+                        points_earned += points
+                        sliced_fruits += 1
+                        break
+
+        # Check bomb collisions
+        for bomb in self.bombs[:]:
+            if not bomb.exploded:
+                bomb_rect = bomb.get_rect()
+                for point in trail:
+                    if bomb_rect.collidepoint(point):
+                        if bomb.explode():
+                            self.lives -= 1
+                            self.combo = 0
+                        break
+
+        # Update combo
+        if sliced_fruits > 0:
+            self.combo += sliced_fruits
+            self.max_combo = max(self.max_combo, self.combo)
+            # Bonus points for combo
+            if self.combo > 3:
+                points_earned += (self.combo - 3) * 5
+
+        self.score += points_earned
+
+    def handle_menu_input(self, event):
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_SPACE:
+                self.state = 'playing'
+                self.reset_game()
+            elif event.key == pygame.K_q:
+                pygame.quit()
+                sys.exit()
+
+    def handle_game_input(self, event):
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                self.state = 'menu'
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:  # Left click
+                self.slashing = True
+                self.mouse_trail = [pygame.mouse.get_pos()]
+        elif event.type == pygame.MOUSEMOTION:
+            if self.slashing:
+                self.mouse_trail.append(pygame.mouse.get_pos())
+                if len(self.mouse_trail) > 10:
+                    self.mouse_trail.pop(0)
+        elif event.type == pygame.MOUSEBUTTONUP:
+            if event.button == 1 and self.slashing:
+                if len(self.mouse_trail) > 1:
+                    self.check_slash_collision(self.mouse_trail)
+                    self.slash_effects.append(SlashEffect(self.mouse_trail.copy()))
+                self.slashing = False
+                self.mouse_trail = []
+
+    def handle_game_over_input(self, event):
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_r:
+                self.state = 'playing'
+                self.reset_game()
+            elif event.key == pygame.K_ESCAPE:
+                self.state = 'menu'
+
+    def reset_game(self):
+        self.score = 0
+        self.lives = 3
+        self.combo = 0
+        self.fruits = []
+        self.bombs = []
+        self.slash_effects = []
+        self.mouse_trail = []
+        self.slashing = False
+        self.fruit_spawn_timer = 0
+        self.bomb_spawn_timer = 0
+
+    def update_game(self):
+        # Spawn fruits
+        self.fruit_spawn_timer += 1
+        if self.fruit_spawn_timer >= self.fruit_spawn_delay:
+            self.spawn_fruit()
+            self.fruit_spawn_timer = 0
+            # Gradually increase spawn rate
+            if self.fruit_spawn_delay > 30:
+                self.fruit_spawn_delay -= 0.1
+
+        # Spawn bombs occasionally
+        self.bomb_spawn_timer += 1
+        if self.bomb_spawn_timer >= self.bomb_spawn_delay:
+            if random.random() < 0.3:  # 30% chance
+                self.spawn_bomb()
+            self.bomb_spawn_timer = 0
+
+        # Update fruits
+        for fruit in self.fruits[:]:
+            fruit.update()
+            if fruit.is_off_screen():
+                if not fruit.sliced:
+                    self.lives -= 1
+                    self.combo = 0
+                self.fruits.remove(fruit)
+
+        # Update bombs
+        for bomb in self.bombs[:]:
+            bomb.update()
+            if bomb.is_off_screen():
+                self.bombs.remove(bomb)
+
+        # Update slash effects
+        for effect in self.slash_effects[:]:
+            effect.update()
+            if effect.life <= 0:
+                self.slash_effects.remove(effect)
+
+        # Check game over
+        if self.lives <= 0:
+            self.state = 'game_over'
+
+    def draw_menu(self):
+        self.screen.fill(self.bg_color)
+
+        title = self.font.render("FRUIT NINJA CLONE", True, BLACK)
+        title_rect = title.get_rect(center=(SCREEN_WIDTH//2, 200))
+        self.screen.blit(title, title_rect)
+
+        instructions = [
+            "Slice fruits with your mouse!",
+            "Avoid bombs - they cost you a life",
+            "Don't let fruits fall off screen",
+            "",
+            "SPACE - Start Game",
+            "Q - Quit"
+        ]
+
+        for i, instruction in enumerate(instructions):
+            text = self.small_font.render(instruction, True, BLACK)
+            text_rect = text.get_rect(center=(SCREEN_WIDTH//2, 300 + i*40))
+            self.screen.blit(text, text_rect)
+
+        # Draw some sample fruits
+        sample_fruits = ['apple', 'orange', 'banana', 'watermelon']
+        for i, fruit_type in enumerate(sample_fruits):
+            x = 200 + i * 200
+            y = 600
+            color = FRUITS[fruit_type]['color']
+            size = FRUITS[fruit_type]['size']
+            pygame.draw.circle(self.screen, color, (x, y), size)
+            pygame.draw.circle(self.screen, BLACK, (x, y), size, 2)
+
+    def draw_game(self):
+        self.screen.fill(self.bg_color)
+
+        # Draw fruits
+        for fruit in self.fruits:
+            fruit.draw(self.screen)
+
+        # Draw bombs
+        for bomb in self.bombs:
+            bomb.draw(self.screen)
+
+        # Draw slash effects
+        for effect in self.slash_effects:
+            effect.draw(self.screen)
+
+        # Draw current mouse trail
+        if self.slashing and len(self.mouse_trail) > 1:
+            pygame.draw.lines(self.screen, WHITE, False, self.mouse_trail, 3)
+
+        # Draw UI
+        score_text = self.font.render(f"Score: {self.score}", True, BLACK)
+        self.screen.blit(score_text, (20, 20))
+
+        lives_text = self.font.render(f"Lives: {self.lives}", True, BLACK)
+        self.screen.blit(lives_text, (20, 70))
+
+        combo_text = self.small_font.render(f"Combo: {self.combo}", True, BLACK)
+        self.screen.blit(combo_text, (20, 120))
+
+        if self.combo > 3:
+            bonus_text = self.small_font.render("COMBO BONUS!", True, YELLOW)
+            self.screen.blit(bonus_text, (20, 150))
+
+        # Instructions
+        instruction_text = self.small_font.render("Click and drag to slice fruits!", True, BLACK)
+        self.screen.blit(instruction_text, (SCREEN_WIDTH - 350, 20))
+
+        esc_text = self.small_font.render("ESC - Menu", True, BLACK)
+        self.screen.blit(esc_text, (SCREEN_WIDTH - 150, 50))
+
+    def draw_game_over(self):
+        self.screen.fill(self.bg_color)
+
+        game_over_text = self.font.render("GAME OVER", True, RED)
+        game_over_rect = game_over_text.get_rect(center=(SCREEN_WIDTH//2, 250))
+        self.screen.blit(game_over_text, game_over_rect)
+
+        score_text = self.font.render(f"Final Score: {self.score}", True, BLACK)
+        score_rect = score_text.get_rect(center=(SCREEN_WIDTH//2, 320))
+        self.screen.blit(score_text, score_rect)
+
+        combo_text = self.small_font.render(f"Best Combo: {self.max_combo}", True, BLACK)
+        combo_rect = combo_text.get_rect(center=(SCREEN_WIDTH//2, 370))
+        self.screen.blit(combo_text, combo_rect)
+
+        restart_text = self.small_font.render("R - Restart", True, BLACK)
+        restart_rect = restart_text.get_rect(center=(SCREEN_WIDTH//2, 450))
+        self.screen.blit(restart_text, restart_rect)
+
+        menu_text = self.small_font.render("ESC - Menu", True, BLACK)
+        menu_rect = menu_text.get_rect(center=(SCREEN_WIDTH//2, 480))
+        self.screen.blit(menu_text, menu_rect)
+
+    def run(self):
+        running = True
+        while running:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+
+                if self.state == 'menu':
+                    self.handle_menu_input(event)
+                elif self.state == 'playing':
+                    self.handle_game_input(event)
+                elif self.state == 'game_over':
+                    self.handle_game_over_input(event)
+
+            # Update
+            if self.state == 'playing':
+                self.update_game()
+
+            # Draw
+            if self.state == 'menu':
+                self.draw_menu()
+            elif self.state == 'playing':
+                self.draw_game()
+            elif self.state == 'game_over':
+                self.draw_game_over()
+
+            pygame.display.flip()
+            self.clock.tick(FPS)
+
+        pygame.quit()
+        sys.exit()
+
+if __name__ == "__main__":
+    game = Game()
+    game.run()
